@@ -1,9 +1,11 @@
 #/usr/sbin/python3
 import sys
 import os
+import subprocess
 
 SMOKING_GUN = "Removed Ice UpdatingAuthenticator"
 LOG_FILE = "/home/douglas/Playground/kairos/test.log"
+RESTART_CMD = ["supervisorctl", "-c", "/home/douglas/Playground/kairos/supervisord.conf", "restart", "authenticator.py"]
 
 def write_stdout(s):
     # only eventlistener protocol messages may be sent to stdout
@@ -35,16 +37,26 @@ def parse_log():
         with open(log_file, 'r') as log:
             for log_line in log.readlines():
                 if error_in_line(log_line):
-                    last_error = parse_error(line)
+                    last_error = parse_error(log_line)
     except FileNotFoundError as e:
         write_stderr(f"Log file: {LOG_FILE} not found!")
     return last_error
 
+def restart_authenticator():
+    write_stderr("Restarting...\n")
+    # Direct STDOUT to /dev/null - supervisord is listening on stdout
+    # TODO this shouldn't be a hard coded command
+    subprocess.run(RESTART_CMD,
+                    stdout=subprocess.DEVNULL);
+
 def main():
-    write_stderr("STARTED")
+    write_stderr("STARTED\n")
 
     # Initial value is blank, so if there is no error it won't be restarted
     last_error = ""
+
+    # Don't do this if it's the initial run
+    first_run = True
 
     while 1:
         # transition from ACKNOWLEDGED to READY
@@ -62,9 +74,18 @@ def main():
         ######################
 
         current_error = parse_log()
-        if last_error != current_error:
+
+        # On the first run, don't worry about the log
+        if first_run:
             last_error = current_error
-            write_stderr(f"FOUND BAD LOGLINE: {last_error}")
+            first_run = False
+
+        # Check if current_error is not blank first, in the chance that the
+        # log gets rotated and the offending line is gone
+        if current_error and (last_error != current_error):
+            last_error = current_error
+            write_stderr(f"\nFOUND BAD LOGLINE: {last_error}")
+            restart_authenticator()
 
         # transition from READY to ACKNOWLEDGED
         write_stdout('RESULT 2\nOK')
